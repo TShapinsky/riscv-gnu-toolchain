@@ -7,10 +7,53 @@ on:
   pull_request:
     branches:
       - master
-
+env:
+  cache-path: |
+    .git/modules
 jobs:
+  cache:
+    name: Update Submodule Cache
+    runs-on: ubuntu-24.04
+    outputs:
+      key: submodules-${{ steps.submodule-hash.outputs.HASH }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate Submodule Hash
+        id: submodule-hash
+        run: echo "HASH=$(git submodule | sha1sum | head -c 40)" >> $GITHUB_OUTPUT
+
+      - name: Check is Cache Exists for Exact Submodule Configuration
+        id: cache-check
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.cache-path }}
+          key: submodules-${{ steps.submodule-hash.outputs.HASH }}
+          lookup-only: true
+
+      - name: If no Cache Hit, Update Cache
+        uses: actions/cache@v4
+        if: steps.cache-check.outputs.cache-hit != 'true'
+        with:
+          path: ${{ env.cache-path }}
+          key: submodules-${{ steps.submodule-hash.outputs.HASH }}
+          restore-keys: |
+            submodules-
+
+      - name: Clone submodules
+        if: steps.cache-check.outputs.cache-hit != 'true'
+        run: |
+          git submodule update --init --progress --depth 1 --jobs $(nproc) binutils gdb gcc llvm newlib glibc musl dejagnu pk qemu spike
+          git submodule update --init --progress uclibc-ng
+
+
+    
   build:
+    name: Build Toolchain Variants
     runs-on: ${{ matrix.os }}
+    needs: [cache]
+    env:
+      cache-key: ${{ needs.cache.outputs.key }}
     strategy:
       matrix:
         os:     [ubuntu-22.04, ubuntu-24.04]
@@ -23,21 +66,44 @@ jobs:
           - mode: uclibc
             compiler: llvm
     steps:
-      - name: Remove unneeded frameworks to recover disk space
-        run: |
-          echo "-- Before --"
-          df -h
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /usr/local/lib/android
-          echo "-- After --"
-          df -h
-
       - uses: actions/checkout@v4
 
-      - name: install dependencies
+      - name: Load cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.cache-path }}
+          key: ${{ env.cache-key }}
+
+      - name: Restore submodules
+        id: cache-path
+        run: |
+          submodules="gdb binutils"
+          case "${{ matrix.mode }}" in
+            "linux")
+              submodules="$submodules glibc";;
+            "musl")
+              submodules="$submodules musl";;
+            "uclibc")
+              submodules="$submodules uclibc-ng";;
+            "newlib")
+              submodules="$submodules newlib";;
+            *)
+              echo "Invalid Mode"; exit 1;;
+          esac
+          case "${{ matrix.compiler }}" in
+            "gcc")
+              submodules="$submodules gcc";;
+            "llvm")
+              submodules="$submodules llvm";;
+            *)
+              echo "Invalid Compiler"; exit 1;;
+          esac
+          git submodule update --init $submodules
+
+      - name: Install Dependencies
         run: sudo ./.github/setup-apt.sh
 
-      - name: build toolchain
+      - name: Build Toolchain
         run: |
           TARGET_TUPLE=($(echo ${{ matrix.target }} | tr "-" "\n"))
           BUILD_TOOLCHAIN="./configure --prefix=/opt/riscv --with-arch=${TARGET_TUPLE[0]} --with-abi=${TARGET_TUPLE[1]}"
@@ -48,7 +114,7 @@ jobs:
           fi
           sudo make -j $(nproc) ${{ matrix.mode }}
 
-      - name: make report
+      - name: Generate Report
         if: |
           matrix.os == 'ubuntu-24.04'
           && (matrix.mode == 'linux' || matrix.mode == 'newlib')
@@ -56,16 +122,10 @@ jobs:
         run: |
           sudo make report-${{ matrix.mode }} -j $(nproc)
 
-      - name: recover space
-        run: |
-          sudo du -hs / 2> /dev/null || true
-          sudo rm -rf binutils dejagnu gcc gdb glibc llvm musl newlib pk qemu spike uclibc-ng || true
-          sudo du -hs / 2> /dev/null || true
-
-      - name: tarball build
+      - name: Tar Toolchain
         run: tar czvf riscv.tar.gz -C /opt/ riscv/
 
-      - name: generate prebuilt toolchain name
+      - name: Generate Prebuilt Toolchain Name
         id:   toolchain-name-generator
         run: |
           if [[ "${{ matrix.target }}" == *"32"* ]]; then BITS=32; else BITS=64; fi
@@ -87,7 +147,11 @@ jobs:
           path: riscv.tar.gz
 
   test-sim:
+    name: Test Simulation
     runs-on: ${{ matrix.os }}
+    needs: [cache]
+    env:
+      cache-key: ${{ needs.cache.outputs.key }}
     strategy:
       matrix:
         os:     [ubuntu-24.04]
@@ -95,27 +159,26 @@ jobs:
         target: [rv64gc-lp64d]
         sim:    [spike]
     steps:
-      - name: Remove unneeded frameworks to recover disk space
-        run: |
-          echo "-- Before --"
-          df -h
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /usr/local/lib/android
-          echo "-- After --"
-          df -h
-
       - uses: actions/checkout@v4
 
-      - name: install dependencies
+      - uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.cache-path }}
+          key: ${{ env.cache-key }}
+
+      - name: Restore submodules
+        run: git submodule update --init gcc newlib binutils gdb spike pk dejagnu
+
+      - name: Install Dependencies
         run: sudo ./.github/setup-apt.sh
 
-      - name: build toolchain
+      - name: Build Toolchain
         run: |
           TARGET_TUPLE=($(echo ${{ matrix.target }} | tr "-" "\n"))
           ./configure --prefix=/opt/riscv --with-arch=${TARGET_TUPLE[0]} --with-abi=${TARGET_TUPLE[1]} --with-sim=${{ matrix.sim }}
           make -j $(nproc) ${{ matrix.mode }}
 
-      - name: make report
+      - name: Generate Report
         run: make report-${{ matrix.mode }} -j $(nproc)
 
   build-multilib:
