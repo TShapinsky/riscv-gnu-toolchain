@@ -57,9 +57,9 @@ jobs:
       CCACHE_DIR: /opt/cache
     strategy:
       matrix:
-        os:     [ubuntu-22.04, ubuntu-24.04]
-        mode:   [newlib, linux, musl, uclibc]
-        target: [rv32gc-ilp32d, rv64gc-lp64d]
+        os:     [ubuntu-22.04]
+        mode:   [linux]
+        target: [rv32gc-ilp32d]
         compiler: [gcc, llvm]
         exclude:
           - mode: musl
@@ -68,6 +68,7 @@ jobs:
             compiler: llvm
     steps:
       - name: Remove unneeded frameworks to recover disk space
+        if: false
         run: |
           echo "-- Before --"
           df -h
@@ -90,10 +91,18 @@ jobs:
           sudo apt-get install -y ccache
           printenv
           mkdir -p $HOME/.local/bin
+          command -v gcc
+          command -v g++
+          command -v cc
+          command -v c++
           ln -s $(command -v ccache) $HOME/.local/bin/gcc
           ln -s $(command -v ccache) $HOME/.local/bin/g++
           ln -s $(command -v ccache) $HOME/.local/bin/cc
           ln -s $(command -v ccache) $HOME/.local/bin/c++
+          command -v gcc
+          command -v g++
+          command -v cc
+          command -v c++
 
       - name: Load CCache
         uses: actions/cache/restore@v4
@@ -112,6 +121,11 @@ jobs:
           else
             $BUILD_TOOLCHAIN
           fi
+          printenv
+          command -v gcc
+          command -v g++
+          command -v cc
+          command -v c++
           sudo make -j $(nproc) ${{ matrix.mode }}
 
       - if: ${{ always() }}
