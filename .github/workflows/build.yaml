@@ -60,8 +60,8 @@ jobs:
       ccache-dir: ${{ env.CCACHE_DIR }}
     strategy:
       matrix:
-        os:     [ubuntu-22.04]
-        mode:   [linux, uclibc]
+        os:     [ubuntu-22.04, ubuntu-24.04]
+        mode:   [linux, uclibc, newlib]
         target: [rv32gc-ilp32d]
         compiler: [gcc]
         exclude:
@@ -124,7 +124,7 @@ jobs:
           else
             $BUILD_TOOLCHAIN
           fi
-          make -j $(nproc) stamps/build-gcc-linux-stage1
+          make -j $(nproc) ${{ matrix.mode }}
 
       - name: Cache Stats
         if: ${{ always() }}
