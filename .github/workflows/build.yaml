@@ -89,10 +89,10 @@ jobs:
           sudo ./.github/setup-apt.sh
           sudo apt-get install -y ccache
           printenv
-          ln -s /usr/bin/ccache /usr/local/bin/gcc
-          ln -s /usr/bin/ccache /usr/local/bin/g++
-          ln -s /usr/bin/ccache /usr/local/bin/cc
-          ln -s /usr/bin/ccache /usr/local/bin/c++
+          ln -s $(command -v ccache) $HOME/.local/bin/gcc
+          ln -s $(command -v ccache) $HOME/.local/bin/g++
+          ln -s $(command -v ccache) $HOME/.local/bin/cc
+          ln -s $(command -v ccache) $HOME/.local/bin/c++
 
       - name: Load CCache
         uses: actions/cache/restore@v4
@@ -117,6 +117,8 @@ jobs:
         run: |
           ls -la ${{ env.CCACHE_DIR }}
           cd ${{ env.CCACHE_DIR }}
+          ccache -s
+          ccache -x
           du -h -d 1
 
       - name: Load CCache
