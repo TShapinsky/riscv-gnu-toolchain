@@ -87,21 +87,22 @@ jobs:
         run: |
           sudo ./.github/setup-apt.sh
           sudo apt-get install -y ccache
+          printenv
           ln -s /usr/bin/ccache /usr/local/bin/gcc
           ln -s /usr/bin/ccache /usr/local/bin/g++
           ln -s /usr/bin/ccache /usr/local/bin/cc
           ln -s /usr/bin/ccache /usr/local/bin/c++
 
       - name: Load CCache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
-          path: /opt/ccache
+          path: /opt/cache
           key: ${{ matrix.mode }}-${{ matrix.compiler }}
         
       - name: Build Toolchain
         env:
           CCACHE_DEPEND: true
-          CCACHE_DIR: /opt/ccache
+          CCACHE_DIR: /opt/cache
         run: |
           TARGET_TUPLE=($(echo ${{ matrix.target }} | tr "-" "\n"))
           BUILD_TOOLCHAIN="./configure --prefix=/opt/riscv --with-arch=${TARGET_TUPLE[0]} --with-abi=${TARGET_TUPLE[1]}"
@@ -111,6 +112,18 @@ jobs:
             $BUILD_TOOLCHAIN
           fi
           sudo make -j $(nproc) ${{ matrix.mode }}
+
+      - if: ${{ always() }}
+        run: |
+          ls -la /opt/ccache
+          du -h -d 1
+
+      - name: Load CCache
+        uses: actions/cache/save@v4
+        if: ${{ always() }}
+        with:
+          path: /opt/ccache
+          key: ${{ matrix.mode }}-${{ matrix.compiler }}
 
       - name: Generate Report
         if: |
