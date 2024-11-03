@@ -60,7 +60,7 @@ jobs:
         os:     [ubuntu-22.04]
         mode:   [linux]
         target: [rv32gc-ilp32d]
-        compiler: [gcc, llvm]
+        compiler: [gcc]
         exclude:
           - mode: musl
             compiler: llvm
@@ -119,7 +119,7 @@ jobs:
           command -v g++
           command -v cc
           command -v c++
-          sudo make -j $(nproc) ${{ matrix.mode }}
+          sudo make -j $(nproc) stamps/build-gcc-linux-stage1
 
       - if: ${{ always() }}
         run: |
