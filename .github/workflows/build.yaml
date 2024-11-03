@@ -129,8 +129,6 @@ jobs:
           ccache -s
           ccache -x
           du -h -d 1
-          ls -la $HOME/.cache
-          du -h -d 1 $HOME/.cache
 
       - name: Load CCache
         uses: actions/cache/save@v4
