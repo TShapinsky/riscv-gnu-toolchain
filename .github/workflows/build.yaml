@@ -84,9 +84,24 @@ jobs:
           key: ${{ env.cache-key }}
 
       - name: Install Dependencies
-        run: sudo ./.github/setup-apt.sh
+        run: |
+          sudo ./.github/setup-apt.sh
+          apt-get install -y ccache
+          ln -s /usr/bin/ccache /usr/local/bin/gcc
+          ln -s /usr/bin/ccache /usr/local/bin/g++
+          ln -s /usr/bin/ccache /usr/local/bin/cc
+          ln -s /usr/bin/ccache /usr/local/bin/c++
 
+      - name: Load CCache
+        uses: actions/cache@v4
+        with:
+          path: /opt/ccache
+          key: ${{ matrix.mode }}-${{ matrix.compiler }}
+        
       - name: Build Toolchain
+        env:
+          CCACHE_DEPEND: true
+          CCACHE_DIR: /opt/ccache
         run: |
           TARGET_TUPLE=($(echo ${{ matrix.target }} | tr "-" "\n"))
           BUILD_TOOLCHAIN="./configure --prefix=/opt/riscv --with-arch=${TARGET_TUPLE[0]} --with-abi=${TARGET_TUPLE[1]}"
