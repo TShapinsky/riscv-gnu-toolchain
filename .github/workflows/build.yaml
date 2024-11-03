@@ -56,10 +56,12 @@ jobs:
       cache-key: ${{ needs.cache.outputs.key }}
       CCACHE_DIR: ${{ github.workspace }}/ccache
       INSTALL_DIR: ${{ github.workspace }}/riscv
+    outputs:
+      ccache-dir: ${{ env.CCACHE_DIR }}
     strategy:
       matrix:
         os:     [ubuntu-22.04]
-        mode:   [linux]
+        mode:   [linux, uclibc]
         target: [rv32gc-ilp32d]
         compiler: [gcc]
         exclude:
@@ -70,75 +72,6 @@ jobs:
     steps:
       - name: Maximize build space
         uses: easimon/maximize-build-space@master
-
-      - uses: actions/checkout@v4
-
-      - name: Load cache
-        uses: actions/cache/restore@v4
-        with:
-          path: ${{ env.cache-path }}
-          key: ${{ env.cache-key }}
-
-      - name: Install Dependencies
-        run: |
-          sudo ./.github/setup-apt.sh
-          sudo apt-get install -y ccache
-          sudo printenv
-          mkdir -p $HOME/.local/bin
-          command -v gcc
-          command -v g++
-          command -v cc
-          command -v c++
-          ln -s $(command -v ccache) $HOME/.local/bin/gcc
-          ln -s $(command -v ccache) $HOME/.local/bin/g++
-          ln -s $(command -v ccache) $HOME/.local/bin/cc
-          ln -s $(command -v ccache) $HOME/.local/bin/c++
-          command -v gcc
-          command -v g++
-          command -v cc
-          command -v c++
-
-      - name: Load CCache
-        uses: actions/cache/restore@v4
-        with:
-          path: ${{ env.CCACHE_DIR }}
-          key: ${{ matrix.mode }}-${{ matrix.compiler }}
-        
-      - name: Build Toolchain
-        env:
-          CCACHE_DEPEND: true
-        run: |
-          TARGET_TUPLE=($(echo ${{ matrix.target }} | tr "-" "\n"))
-          BUILD_TOOLCHAIN="./configure --prefix=${{ env.INSTALL_DIR }} --with-arch=${TARGET_TUPLE[0]} --with-abi=${TARGET_TUPLE[1]}"
-          if [ "${{ matrix.compiler }}" == "llvm" ]; then # build toolchain with llvm
-            $BUILD_TOOLCHAIN --enable-llvm
-          else
-            $BUILD_TOOLCHAIN
-          fi
-          printenv
-          command -v gcc
-          command -v g++
-          command -v cc
-          command -v c++
-          make -j $(nproc) stamps/build-gcc-linux-stage1
-
-      - if: ${{ always() }}
-        run: |
-          ls -la ${{ env.CCACHE_DIR }}
-          cd ${{ env.CCACHE_DIR }}
-          ccache -s
-          ccache -x
-          du -h -d 1
-
-      - name: Load CCache
-        uses: actions/cache/save@v4
-        if: ${{ always() }}
-        with:
-          path: ${{ env.CCACHE_DIR }}
-          key: ${{ matrix.mode }}-${{ matrix.compiler }}
-
-      - name: Tar Toolchain
-        run: tar czvf riscv.tar.gz -C ${{ github.workspace }} riscv/
 
       - name: Generate Prebuilt Toolchain Name
         id:   toolchain-name-generator
@@ -156,10 +89,98 @@ jobs:
           esac
           echo "TOOLCHAIN_NAME=riscv$BITS-$MODE-${{ matrix.os }}-${{ matrix.compiler }}-nightly" >> $GITHUB_OUTPUT
 
+      - uses: actions/checkout@v4
+
+      - name: Load cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.cache-path }}
+          key: ${{ env.cache-key }}
+
+      - name: Install Dependencies
+        run: |
+          sudo ./.github/setup-apt.sh
+          sudo apt-get install -y ccache
+          mkdir -p $HOME/.local/bin
+          ln -s $(command -v ccache) $HOME/.local/bin/gcc
+          ln -s $(command -v ccache) $HOME/.local/bin/g++
+          ln -s $(command -v ccache) $HOME/.local/bin/cc
+          ln -s $(command -v ccache) $HOME/.local/bin/c++
+
+      - name: Load CCache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache
+        
+      - name: Build Toolchain
+        env:
+          CCACHE_DEPEND: true
+        run: |
+          TARGET_TUPLE=($(echo ${{ matrix.target }} | tr "-" "\n"))
+          BUILD_TOOLCHAIN="./configure --prefix=${{ env.INSTALL_DIR }} --with-arch=${TARGET_TUPLE[0]} --with-abi=${TARGET_TUPLE[1]}"
+          if [ "${{ matrix.compiler }}" == "llvm" ]; then # build toolchain with llvm
+            $BUILD_TOOLCHAIN --enable-llvm
+          else
+            $BUILD_TOOLCHAIN
+          fi
+          make -j $(nproc) stamps/build-gcc-linux-stage1
+
+      - name: Cache Stats
+        if: ${{ always() }}
+        run: |
+          ls -la ${{ env.CCACHE_DIR }}
+          cd ${{ env.CCACHE_DIR }}
+          ccache -s
+          ccache -x
+          du -h -d 1
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: ccache-${{ steps.toolchain-name-generator.outputs.TOOLCHAIN_NAME }}
+          path: ${{ env.CCACHE_DIR }}
+          include-hidden-files: true
+
+      - name: Tar Toolchain
+        if: false
+        run: tar czvf riscv.tar.gz -C ${{ github.workspace }} riscv/
+
       - uses: actions/upload-artifact@v4
+        if: false
         with:
           name: ${{ steps.toolchain-name-generator.outputs.TOOLCHAIN_NAME }}
           path: riscv.tar.gz
+
+  ccache:
+    name: Post-Process CCache Data
+    runs-on: ubuntu-24.04
+    needs: [build]
+    env:
+      CCACHE_DIR: ${{ needs.build.outputs.ccache-dir}}
+    steps:
+      - name: Download Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ccache-riscv*
+          path: ${{ env.CCACHE_DIR }}
+          merge-multiple: true
+      
+      - name: Cleanup ccache
+        run: |
+          sudo apt-get install ccache
+          ccache -s
+          ccache -x
+          ccache -c
+          ccache -s
+          ccache -x
+
+      - name: Commit CCache
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache
 
   test-sim:
     name: Test Simulation
