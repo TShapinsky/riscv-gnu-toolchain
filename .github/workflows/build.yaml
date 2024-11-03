@@ -83,7 +83,7 @@ jobs:
         run: |
           sudo ./.github/setup-apt.sh
           sudo apt-get install -y ccache
-          printenv
+          sudo printenv
           mkdir -p $HOME/.local/bin
           command -v gcc
           command -v g++
