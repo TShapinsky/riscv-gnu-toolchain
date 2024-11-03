@@ -54,6 +54,7 @@ jobs:
     needs: [cache]
     env:
       cache-key: ${{ needs.cache.outputs.key }}
+      CCACHE_DIR: /opt/cache
     strategy:
       matrix:
         os:     [ubuntu-22.04, ubuntu-24.04]
@@ -96,13 +97,12 @@ jobs:
       - name: Load CCache
         uses: actions/cache/restore@v4
         with:
-          path: /opt/cache
+          path: ${{ env.CCACHE_DIR }}
           key: ${{ matrix.mode }}-${{ matrix.compiler }}
         
       - name: Build Toolchain
         env:
           CCACHE_DEPEND: true
-          CCACHE_DIR: /opt/cache
         run: |
           TARGET_TUPLE=($(echo ${{ matrix.target }} | tr "-" "\n"))
           BUILD_TOOLCHAIN="./configure --prefix=/opt/riscv --with-arch=${TARGET_TUPLE[0]} --with-abi=${TARGET_TUPLE[1]}"
@@ -115,14 +115,15 @@ jobs:
 
       - if: ${{ always() }}
         run: |
-          ls -la /opt/ccache
+          ls -la ${{ env.CCACHE_DIR }}
+          cd ${{ env.CCACHE_DIR }}
           du -h -d 1
 
       - name: Load CCache
         uses: actions/cache/save@v4
         if: ${{ always() }}
         with:
-          path: /opt/ccache
+          path: ${{ env.CCACHE_DIR }}
           key: ${{ matrix.mode }}-${{ matrix.compiler }}
 
       - name: Generate Report
