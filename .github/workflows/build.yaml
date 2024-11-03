@@ -100,10 +100,10 @@ jobs:
         run: |
           sudo ./.github/setup-apt.sh
           sudo apt-get install -y --no-install-recommends ccache
-          ln -s $(command -v ccache) usr/local/bin/gcc
-          ln -s $(command -v ccache) usr/local/bin/g++
-          ln -s $(command -v ccache) usr/local/bin/cc
-          ln -s $(command -v ccache) usr/local/bin/c++
+          ln -s $(command -v ccache) /usr/local/bin/gcc
+          ln -s $(command -v ccache) /usr/local/bin/g++
+          ln -s $(command -v ccache) /usr/local/bin/cc
+          ln -s $(command -v ccache) /usr/local/bin/c++
 
       - name: Load Compile Cache
         uses: actions/cache/restore@v4
