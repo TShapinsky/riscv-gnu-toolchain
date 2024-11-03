@@ -120,7 +120,7 @@ jobs:
           command -v g++
           command -v cc
           command -v c++
-          sudo make -j $(nproc) stamps/build-gcc-linux-stage1
+          make -j $(nproc) stamps/build-gcc-linux-stage1
 
       - if: ${{ always() }}
         run: |
