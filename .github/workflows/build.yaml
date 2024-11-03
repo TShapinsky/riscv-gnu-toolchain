@@ -54,7 +54,8 @@ jobs:
     needs: [cache]
     env:
       cache-key: ${{ needs.cache.outputs.key }}
-      CCACHE_DIR: /opt/cache
+      CCACHE_DIR: ${{ github.workspace }}/ccache
+      INSTALL_DIR: ${{ github.workspace }}/riscv
     strategy:
       matrix:
         os:     [ubuntu-22.04]
@@ -108,7 +109,7 @@ jobs:
           CCACHE_DEPEND: true
         run: |
           TARGET_TUPLE=($(echo ${{ matrix.target }} | tr "-" "\n"))
-          BUILD_TOOLCHAIN="./configure --prefix=/opt/riscv --with-arch=${TARGET_TUPLE[0]} --with-abi=${TARGET_TUPLE[1]}"
+          BUILD_TOOLCHAIN="./configure --prefix=${{ env.INSTALL_DIR }} --with-arch=${TARGET_TUPLE[0]} --with-abi=${TARGET_TUPLE[1]}"
           if [ "${{ matrix.compiler }}" == "llvm" ]; then # build toolchain with llvm
             $BUILD_TOOLCHAIN --enable-llvm
           else
@@ -139,7 +140,7 @@ jobs:
           key: ${{ matrix.mode }}-${{ matrix.compiler }}
 
       - name: Tar Toolchain
-        run: tar czvf riscv.tar.gz -C /opt/ riscv/
+        run: tar czvf riscv.tar.gz -C ${{ github.workspace }} riscv/
 
       - name: Generate Prebuilt Toolchain Name
         id:   toolchain-name-generator
