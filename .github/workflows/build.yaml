@@ -89,6 +89,7 @@ jobs:
           sudo ./.github/setup-apt.sh
           sudo apt-get install -y ccache
           printenv
+          mkdir -p $HOME/.local/bin
           ln -s $(command -v ccache) $HOME/.local/bin/gcc
           ln -s $(command -v ccache) $HOME/.local/bin/g++
           ln -s $(command -v ccache) $HOME/.local/bin/cc
