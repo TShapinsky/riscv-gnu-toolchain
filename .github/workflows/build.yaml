@@ -86,7 +86,7 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo ./.github/setup-apt.sh
-          apt-get install -y ccache
+          sudo apt-get install -y ccache
           ln -s /usr/bin/ccache /usr/local/bin/gcc
           ln -s /usr/bin/ccache /usr/local/bin/g++
           ln -s /usr/bin/ccache /usr/local/bin/cc
