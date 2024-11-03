@@ -67,15 +67,8 @@ jobs:
           - mode: uclibc
             compiler: llvm
     steps:
-      - name: Remove unneeded frameworks to recover disk space
-        if: false
-        run: |
-          echo "-- Before --"
-          df -h
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /usr/local/lib/android
-          echo "-- After --"
-          df -h
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@master
 
       - uses: actions/checkout@v4
 
@@ -135,6 +128,8 @@ jobs:
           ccache -s
           ccache -x
           du -h -d 1
+          ls -la $HOME/.cache
+          du -h -d 1 $HOME/.cache
 
       - name: Load CCache
         uses: actions/cache/save@v4
@@ -142,20 +137,6 @@ jobs:
         with:
           path: ${{ env.CCACHE_DIR }}
           key: ${{ matrix.mode }}-${{ matrix.compiler }}
-
-      - name: Generate Report
-        if: |
-          matrix.os == 'ubuntu-24.04'
-          && (matrix.mode == 'linux' || matrix.mode == 'newlib')
-          && matrix.compiler == 'gcc'
-        run: |
-          sudo make report-${{ matrix.mode }} -j $(nproc)
-
-      - name: Recover Space
-        run: |
-          sudo du -hs / 2> /dev/null || true
-          sudo rm -rf binutils dejagnu gcc gdb glibc llvm musl newlib pk qemu spike uclibc-ng || true
-          sudo du -hs / 2> /dev/null || true
 
       - name: Tar Toolchain
         run: tar czvf riscv.tar.gz -C /opt/ riscv/
