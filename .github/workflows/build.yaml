@@ -116,7 +116,8 @@ jobs:
           key: ccache
         
       - name: Build GCC Toolchain
-        run: |            
+        run: |
+          ./configure --prefix=${{ env.INSTALL_DIR }} --with-arch=${{ matrix.target.arch }} --with-abi=${{ matrix.target.abi }}
           make -j $(nproc) ${{ matrix.mode }}
 
       - name: Tar GCC Toolchain
