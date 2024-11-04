@@ -15,3 +15,9 @@ Cache Building Time
 | Direct w/ Depend       | 13:44     | 164:24    | 13:58       | 0.99GB     | 4.60%      |
 | No Direct              | 14:11     | 170:26    | 15:44       | 0.95GB     | 4.88%      |
 | No Direct w/ Depend    | 13:49     | 164:26    | 13:46       | 0.43GB     | 4.23%      |
+
+
+
+ccache -C && ccache -z && rm -rf /opt/riscv && make clean && time make linux -j$(nproc) && ccache -s -v
+
+C++ only

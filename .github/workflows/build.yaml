@@ -61,13 +61,16 @@ jobs:
       matrix:
         os:     [ubuntu-22.04, ubuntu-24.04]
         mode:   [newlib, linux, musl, uclibc]
-        target: [rv32gc-ilp32d, rv64gc-lp64d]
-        compiler: [gcc, llvm]
-        exclude:
-          - mode: musl
-            compiler: llvm
-          - mode: uclibc
-            compiler: llvm
+        target: 
+        - arch: rv32gc
+          abi: ilp32d
+        - arch: rv64gc
+          abi: lp64d
+        # exclude:
+        #   - mode: musl
+        #     compiler: llvm
+        #   - mode: uclibc
+        #     compiler: llvm
     steps:
       - name: Maximize build space
         uses: easimon/maximize-build-space@v10
@@ -75,20 +78,23 @@ jobs:
           root-reserve-mb: '10240'
 
       - name: Generate Prebuilt Toolchain Name
-        id:   toolchain-name-generator
+        id: toolchain
         run: |
-          if [[ "${{ matrix.target }}" == *"32"* ]]; then BITS=32; else BITS=64; fi
+          target=${{ matrix.target }}
+          bits=${target:2:2}
           case "${{ matrix.mode }}" in
             "linux")
-              MODE="glibc";;
+              mode="glibc";;
             "musl")
-              MODE="musl";;
+              mode="musl";;
             "uclibc")
-              MODE="uclibc-ng";;
+              mode="uclibc-ng";;
             *)
-              MODE="elf";;
+              mode="elf";;
           esac
-          echo "TOOLCHAIN_NAME=riscv$BITS-$MODE-${{ matrix.os }}-${{ matrix.compiler }}-nightly" >> $GITHUB_OUTPUT
+          echo "mode=$mode" >> $GITHUB_OUTPUT
+          echo "gcc=risc$bits-$mode-${{ matrix.os }}-gcc-${{ github.job }}" >> $GITHUB_OUTPUT
+          echo "llvm=risc$bits-$mode-${{ matrix.os }}-llvm-${{ github.job }}" >> $GITHUB_OUTPUT
 
       - uses: actions/checkout@v4
 
@@ -113,22 +119,30 @@ jobs:
           path: ${{ env.CCACHE_DIR }}
           key: ccache
         
-      - name: Build Toolchain         
+      - name: Build Toolchain Stage 1
         run: |
-          TARGET_TUPLE=($(echo ${{ matrix.target }} | tr "-" "\n"))
-          BUILD_TOOLCHAIN="./configure --prefix=${{ env.INSTALL_DIR }} --with-arch=${TARGET_TUPLE[0]} --with-abi=${TARGET_TUPLE[1]}"
-          if [ "${{ matrix.compiler }}" == "llvm" ]; then # build toolchain with llvm
-            $BUILD_TOOLCHAIN --enable-llvm
-          else
-            $BUILD_TOOLCHAIN
-          fi
-          make -j $(nproc) ${{ matrix.mode }}
+          ./configure --prefix=${{ env.INSTALL_DIR }} --with-arch=${{ matrix.target.arch }} --with-abi=${{ matrix.target.abi }}
+          case "${{ matrix.mode }}" in
+            "linux")
+              targets="stamps/build-glibc-linux-headers stamps/build-gdb-linux";;
+            "musl")
+              targets="stamps/build-musl-linux-headers stamps/build-musl-linux stamps/build-gdb-musl";;
+            "uclibc")
+              targets="stamps/build-uclibc-linux";;
+            "newlib")
+              targets="stamps/build-newlib stamps/build-newlib-nano stamps/build-gdb-newlib";;
+            *)
+              echo "Invalid mode"; exit 1;;
+          esac
+            
+          make -j $(nproc) $targets
 
       - name: Cache Stats
         if: ${{ always() }}
         run: |
           ls -la ${{ env.CCACHE_DIR }}
           cd ${{ env.CCACHE_DIR }}
+          ccache --cleanup
           ccache -s
           ccache -x
           du -h -d 1
@@ -137,19 +151,39 @@ jobs:
         uses: actions/upload-artifact@v4
         if: ${{ always() }}
         with:
-          name: ccache-${{ steps.toolchain-name-generator.outputs.TOOLCHAIN_NAME }}
+          name: ccache-${{matrix.target}}-${{matrix.mode}}-${{matrix.os}}
           path: ${{ env.CCACHE_DIR }}
           include-hidden-files: true
 
-      - name: Tar Toolchain
-        if: false
-        run: tar czvf riscv.tar.gz -C ${{ github.workspace }} riscv/
+      - name: Build Rest of GCC Toolchain
+        run: |
+          make -j $(nproc) ${{ matrix.mode }}
 
-      - uses: actions/upload-artifact@v4
-        if: false
+      - name: Tar GCC Toolchain
+        run: tar czvf ${{ steps.toolchain.outputs.gcc }}.tar.gz -C ${{ github.workspace }} riscv/
+
+      - name: Upload GCC Toolchain
+        uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.toolchain-name-generator.outputs.TOOLCHAIN_NAME }}
-          path: riscv.tar.gz
+          name: ${{ steps.toolchain.outputs.gcc }}
+          path: ${{ steps.toolchain.outputs.gcc }}.tar.gz
+
+      - name: Build LLVM Toolchain
+        if: ${{ matrix.mode == 'linux' || matrix.mode == 'newlib' }}
+        run: |
+          ./configure --prefix=${{ env.INSTALL_DIR }} --with-arch=${{ matrix.target.arch }} --with-abi=${{ matrix.target.abi }} --enable-llvm
+          make -j $(nproc) ${{ matrix.mode }}
+
+      - name: Tar LLVM Toolchain
+        if: ${{ matrix.mode == 'linux' || matrix.mode == 'newlib' }}
+        run: tar czvf ${{ steps.toolchain.outputs.llvm }}.tar.gz -C ${{ github.workspace }} riscv/
+  
+      - name: Upload LLVM Toolchain
+        uses: actions/upload-artifact@v4
+        if: ${{ matrix.mode == 'linux' || matrix.mode == 'newlib' }}
+        with:
+          name: ${{ steps.toolchain.outputs.llvm }}
+          path: ${{ steps.toolchain.outputs.llvm }}.tar.gz
 
   ccache:
     name: Post-Process CCache Data
@@ -159,7 +193,7 @@ jobs:
       - name: Download Artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: ccache-riscv*
+          pattern: ccache-*
           path: ${{ env.CCACHE_DIR }}
           merge-multiple: true
       
@@ -168,7 +202,7 @@ jobs:
           sudo apt-get install ccache
           ccache -s
           ccache -x
-          ccache -c
+          ccache --cleanup
           ccache -s
           ccache -x
 
