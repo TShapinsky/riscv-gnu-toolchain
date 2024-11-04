@@ -11,7 +11,9 @@ env:
   cache-path: |
     .git/modules
   CCACHE_DIR: ${{ github.workspace}}/ccache
-  CCACHE_DEPEND: true
+  CCACHE_NODIRECT: true # Only use hashes of code which has been through the preprocessor
+  CCACHE_NOHASHDIR: true # Don't include CWD in hash (allows caching to be shared between targets)
+  CCACHE_BASEDIR: ${{ github.workspace }}
 jobs:
   cache:
     name: Update Submodule Cache
@@ -47,8 +49,6 @@ jobs:
         run: |
           git submodule update --init --progress uclibc-ng
           git submodule update --init --progress --depth 1 --jobs $(nproc)
-
-
     
   build:
     name: Build Toolchain Variants
@@ -66,11 +66,6 @@ jobs:
           abi: ilp32d
         - arch: rv64gc
           abi: lp64d
-        # exclude:
-        #   - mode: musl
-        #     compiler: llvm
-        #   - mode: uclibc
-        #     compiler: llvm
     steps:
       - name: Maximize build space
         uses: easimon/maximize-build-space@v10
@@ -120,44 +115,8 @@ jobs:
           path: ${{ env.CCACHE_DIR }}
           key: ccache
         
-      - name: Build Toolchain Stage 1
-        run: |
-          ./configure --prefix=${{ env.INSTALL_DIR }} --with-arch=${{ matrix.target.arch }} --with-abi=${{ matrix.target.abi }}
-          case "${{ matrix.mode }}" in
-            "linux")
-              targets="stamps/build-glibc-linux-headers stamps/build-gdb-linux";;
-            "musl")
-              targets="stamps/build-musl-linux-headers stamps/build-musl-linux stamps/build-gdb-musl";;
-            "uclibc")
-              targets="stamps/build-uclibc-linux";;
-            "newlib")
-              targets="stamps/build-newlib stamps/build-newlib-nano stamps/build-gdb-newlib";;
-            *)
-              echo "Invalid mode"; exit 1;;
-          esac
-            
-          make -j $(nproc) $targets
-
-      - name: Cache Stats
-        if: ${{ always() }}
-        run: |
-          ls -la ${{ env.CCACHE_DIR }}
-          cd ${{ env.CCACHE_DIR }}
-          ccache --cleanup
-          ccache -s
-          ccache -x
-          du -h -d 1
-
-      - name: Save Compile Cache
-        uses: actions/upload-artifact@v4
-        if: ${{ always() }}
-        with:
-          name: ccache-${{ steps.toolchain.outputs.bits }}-${{matrix.mode}}-${{matrix.os}}
-          path: ${{ env.CCACHE_DIR }}
-          include-hidden-files: true
-
-      - name: Build Rest of GCC Toolchain
-        run: |
+      - name: Build GCC Toolchain
+        run: |            
           make -j $(nproc) ${{ matrix.mode }}
 
       - name: Tar GCC Toolchain
@@ -185,6 +144,24 @@ jobs:
         with:
           name: ${{ steps.toolchain.outputs.llvm }}
           path: ${{ steps.toolchain.outputs.llvm }}.tar.gz
+
+      - name: Cache Stats
+        if: ${{ always() }}
+        run: |
+          ls -la ${{ env.CCACHE_DIR }}
+          cd ${{ env.CCACHE_DIR }}
+          ccache --cleanup
+          ccache -s
+          ccache -x
+          du -h -d 1
+
+      - name: Save Compile Cache
+        uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: ccache-${{ steps.toolchain.outputs.bits }}-${{matrix.mode}}-${{matrix.os}}
+          path: ${{ env.CCACHE_DIR }}
+          include-hidden-files: true
 
   ccache:
     name: Post-Process CCache Data
