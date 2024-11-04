@@ -80,7 +80,7 @@ jobs:
       - name: Generate Prebuilt Toolchain Name
         id: toolchain
         run: |
-          target=${{ matrix.target }}
+          target=${{ matrix.target.arch }}
           bits=${target:2:2}
           case "${{ matrix.mode }}" in
             "linux")
