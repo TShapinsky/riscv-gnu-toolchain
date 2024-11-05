@@ -119,6 +119,7 @@ jobs:
       - name: Build GCC Toolchain
         id: build-gcc
         run: |
+          ccache -z
           START_TIME=$(date +%s)
           ./configure --prefix=${{ env.INSTALL_DIR }} --with-arch=${{ matrix.target.arch }} --with-abi=${{ matrix.target.abi }}
           make -j $(nproc) ${{ matrix.mode }}
@@ -187,6 +188,7 @@ jobs:
           sudo apt-get install ccache
           ccache -s -v
           ccache --cleanup
+          ccache -x
           ccache -z
 
 
