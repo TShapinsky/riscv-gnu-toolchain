@@ -246,8 +246,7 @@ jobs:
 
       - name: Build Toolchain
         run: |
-          TARGET_TUPLE=($(echo ${{ matrix.target }} | tr "-" "\n"))
-          ./configure --prefix=/opt/riscv --with-arch=${TARGET_TUPLE[0]} --with-abi=${TARGET_TUPLE[1]} --with-sim=${{ matrix.sim }}
+          ./configure --prefix=${{ github.workspace }}/riscv --with-arch=${{ matrix.target.arch}} --with-abi=${{ matrix.target.abi }} --with-sim=${{ matrix.sim }}
           make -j $(nproc) ${{ matrix.mode }}
 
       - name: Generate Report
