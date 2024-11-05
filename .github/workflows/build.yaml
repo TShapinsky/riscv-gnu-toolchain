@@ -188,7 +188,7 @@ jobs:
           ccache -s -v
           ccache --evict-older-than $(($(date +%s) - ${{ steps.build-gcc.outputs.START_TIME }}))s
           hits=$(ccache -s | perl -ne 'print "$1\n" if /Hits.*?(\d{1,2}\.\d{2})%/')
-          echo "hits=$hits" >> $GITHUB_OUTPUT
+          echo "hits=\"$hits\"" >> $GITHUB_OUTPUT
 
       - name: Save Compile Cache
         uses: actions/upload-artifact@v4
@@ -276,7 +276,7 @@ jobs:
 
       - name: Build Toolchain
         run: |
-          ./configure --prefix=${{ github.workspace }}/riscv --with-arch=${{ matrix.target.arch}} --with-abi=${{ matrix.target.abi }} --with-sim=${{ matrix.sim }}
+          ./configure --prefix=/opt/riscv --with-arch=${{ matrix.target.arch}} --with-abi=${{ matrix.target.abi }} --with-sim=${{ matrix.sim }}
           make -j $(nproc) ${{ matrix.mode }}
 
       - name: Generate Report
