@@ -149,12 +149,8 @@ jobs:
       - name: Cache Stats
         if: ${{ always() }}
         run: |
-          ls -la ${{ env.CCACHE_DIR }}
-          cd ${{ env.CCACHE_DIR }}
           ccache --cleanup
-          ccache -s
-          ccache -x
-          du -h -d 1
+          ccache -s -v
 
       - name: Save Compile Cache
         uses: actions/upload-artifact@v4
@@ -179,11 +175,9 @@ jobs:
       - name: Cleanup ccache
         run: |
           sudo apt-get install ccache
-          ccache -s
-          ccache -x
+          ccache -s -v
           ccache --cleanup
-          ccache -s
-          ccache -x
+          ccache -s -v
 
       - name: Commit CCache
         uses: actions/cache/save@v4
