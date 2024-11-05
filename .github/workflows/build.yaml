@@ -13,6 +13,7 @@ env:
   CCACHE_DIR: ${{ github.workspace}}/ccache
   CCACHE_NODIRECT: true # Only use hashes of code which has been through the preprocessor
   CCACHE_NOHASHDIR: true # Don't include CWD in hash (allows caching to be shared between targets)
+  CCACHE_MAXSIZE: "3G" # Keep the compile cache less than 3Gib
   CCACHE_BASEDIR: ${{ github.workspace }}
 jobs:
   cache:
@@ -116,9 +117,12 @@ jobs:
           key: ccache
         
       - name: Build GCC Toolchain
+        id: build-gcc
         run: |
+          START_TIME = $(date +%s)
           ./configure --prefix=${{ env.INSTALL_DIR }} --with-arch=${{ matrix.target.arch }} --with-abi=${{ matrix.target.abi }}
           make -j $(nproc) ${{ matrix.mode }}
+          echo "START_TIME=$START_TIME" >> $GITHUB_OUTPUT
 
       - name: Tar GCC Toolchain
         run: tar czvf ${{ steps.toolchain.outputs.gcc }}.tar.gz -C ${{ github.workspace }} riscv/
@@ -137,7 +141,9 @@ jobs:
 
       - name: Tar LLVM Toolchain
         if: ${{ matrix.mode == 'linux' || matrix.mode == 'newlib' }}
-        run: tar czvf ${{ steps.toolchain.outputs.llvm }}.tar.gz -C ${{ github.workspace }} riscv/
+        run: |
+          mv ${{ steps.toolchain.outputs.gcc }}.tar.gz ${{ steps.toolchain.outputs.llvm }}.tar.gz
+          tar uzvf ${{ steps.toolchain.outputs.llvm }}.tar.gz -C ${{ github.workspace }} riscv/
   
       - name: Upload LLVM Toolchain
         uses: actions/upload-artifact@v4
@@ -151,6 +157,8 @@ jobs:
         run: |
           ccache --cleanup
           ccache -s -v
+          ccache --evict-older-than $(($(date +%s) - ${{ steps.build-gcc.outputs.START_TIME }}))s
+          ccache -s -v
 
       - name: Save Compile Cache
         uses: actions/upload-artifact@v4
@@ -160,11 +168,17 @@ jobs:
           path: ${{ env.CCACHE_DIR }}
           include-hidden-files: true
 
-  ccache:
+  compile-cache:
     name: Post-Process CCache Data
     runs-on: ubuntu-24.04
     needs: [build]
     steps:
+      - name: Commit CCache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache
+
       - name: Download Artifacts
         uses: actions/download-artifact@v4
         with:
@@ -177,13 +191,8 @@ jobs:
           sudo apt-get install ccache
           ccache -s -v
           ccache --cleanup
-          ccache -s -v
+          ccache -z
 
-      - name: Commit CCache
-        uses: actions/cache/save@v4
-        with:
-          path: ${{ env.CCACHE_DIR }}
-          key: ccache
 
   test-sim:
     name: Test Simulation
