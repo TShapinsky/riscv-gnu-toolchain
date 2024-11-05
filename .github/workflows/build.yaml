@@ -119,7 +119,7 @@ jobs:
       - name: Build GCC Toolchain
         id: build-gcc
         run: |
-          START_TIME = $(date +%s)
+          START_TIME=$(date +%s)
           ./configure --prefix=${{ env.INSTALL_DIR }} --with-arch=${{ matrix.target.arch }} --with-abi=${{ matrix.target.abi }}
           make -j $(nproc) ${{ matrix.mode }}
           echo "START_TIME=$START_TIME" >> $GITHUB_OUTPUT
