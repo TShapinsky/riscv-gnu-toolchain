@@ -20,7 +20,7 @@ env:
   REGISTRY_BASE_URI: "ghcr.io/tshapinsky/riscv-gnu-toolchain"
 jobs:
   container:
-    if: !always()
+    if: false
     name: Construct Build Container
     runs-on: ubuntu-24.04
     steps:
