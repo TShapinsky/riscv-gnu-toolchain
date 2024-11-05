@@ -141,9 +141,7 @@ jobs:
 
       - name: Tar LLVM Toolchain
         if: ${{ matrix.mode == 'linux' || matrix.mode == 'newlib' }}
-        run: |
-          mv ${{ steps.toolchain.outputs.gcc }}.tar.gz ${{ steps.toolchain.outputs.llvm }}.tar.gz
-          tar uzvf ${{ steps.toolchain.outputs.llvm }}.tar.gz -C ${{ github.workspace }} riscv/
+        run: tar czvf ${{ steps.toolchain.outputs.llvm }}.tar.gz -C ${{ github.workspace }} riscv/
   
       - name: Upload LLVM Toolchain
         uses: actions/upload-artifact@v4
