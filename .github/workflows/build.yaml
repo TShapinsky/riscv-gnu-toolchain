@@ -15,6 +15,7 @@ env:
   CCACHE_NOHASHDIR: true # Don't include CWD in hash (allows caching to be shared between targets)
   CCACHE_MAXSIZE: "3G" # Keep the compile cache less than 3Gib
   CCACHE_BASEDIR: ${{ github.workspace }}
+  compile-cache-key: ccache-${{ github.ref_name }}-${{ github.sha }}
 jobs:
   cache:
     name: Update Submodule Cache
@@ -100,21 +101,24 @@ jobs:
         with:
           path: ${{ env.cache-path }}
           key: ${{ env.cache-key }}
-
+          
+      - name: Load Compile Cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          restore-keys: |
+            ccache-${{ github.ref_name }}-
+            ccache
+        
       - name: Install Dependencies
         run: |
           sudo ./.github/setup-apt.sh
-          sudo apt-get install -y --no-install-recommends ccache
+          curl -fsL https://github.com/ccache/ccache/releases/download/v4.10.2/ccache-4.10.2-linux-x86_64.tar.xz | tar xJv --strip-components 1 -C /usr/bin ccache-4.10.2-linux-x86_64/ccache
           ln -s $(command -v ccache) /usr/local/bin/gcc
           ln -s $(command -v ccache) /usr/local/bin/g++
           ln -s $(command -v ccache) /usr/local/bin/cc
           ln -s $(command -v ccache) /usr/local/bin/c++
 
-      - name: Load Compile Cache
-        uses: actions/cache/restore@v4
-        with:
-          path: ${{ env.CCACHE_DIR }}
-          key: ccache
         
       - name: Build GCC Toolchain
         id: build-gcc
@@ -152,21 +156,24 @@ jobs:
           path: ${{ steps.toolchain.outputs.llvm }}.tar.gz
 
       - name: Cache Stats
+        id: cache-stats
         run: |
           ccache --cleanup
           ccache -s -v
           ccache --evict-older-than $(($(date +%s) - ${{ steps.build-gcc.outputs.START_TIME }}))s
-          ccache -s -v
+          hits=$(ccache -s | grep -Po 'Hits.*\(\K(\d{1,2}\.\d{2})')
+          echo "hits=$hits" >> $GITHUB_OUTPUT
 
       - name: Save Compile Cache
         uses: actions/upload-artifact@v4
+        if: steps.cache-stats.outputs.hits < 95
         with:
           name: ccache-${{ steps.toolchain.outputs.bits }}-${{matrix.mode}}-${{matrix.os}}
           path: ${{ env.CCACHE_DIR }}
           include-hidden-files: true
 
   compile-cache:
-    name: Post-Process CCache Data
+    name: Post-Process Compile Cache Data
     runs-on: ubuntu-24.04
     needs: [build]
     steps:
@@ -174,7 +181,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ env.CCACHE_DIR }}
-          key: ccache
+          key: ${{ env.compile-cache-key }}
 
       - name: Download Artifacts
         uses: actions/download-artifact@v4
@@ -185,7 +192,7 @@ jobs:
       
       - name: Cleanup Compile Cache
         run: |
-          sudo apt-get install ccache
+          curl -fsL https://github.com/ccache/ccache/releases/download/v4.10.2/ccache-4.10.2-linux-x86_64.tar.xz | tar xJv --strip-components 1 -C /usr/bin ccache-4.10.2-linux-x86_64/ccache
           ccache -s -v
           ccache --cleanup
           ccache -x
@@ -202,17 +209,15 @@ jobs:
       matrix:
         os:     [ubuntu-24.04]
         mode:   [newlib]
-        target: [rv64gc-lp64d]
+        target:
+        - arch: rv64gc
+          abi: lp64d
         sim:    [spike]
     steps:
-      - name: Remove unneeded frameworks to recover disk space
-        run: |
-          echo "-- Before --"
-          df -h
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /usr/local/lib/android
-          echo "-- After --"
-          df -h
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@v10
+        with:
+          root-reserve-mb: '10240'
 
       - uses: actions/checkout@v4
 
@@ -222,8 +227,22 @@ jobs:
           path: ${{ env.cache-path }}
           key: ${{ env.cache-key }}
 
+      - name: Load Compile Cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          restore-keys: |
+            ccache-${{ github.ref_name }}-
+            ccache
+  
       - name: Install Dependencies
-        run: sudo ./.github/setup-apt.sh
+        run: |
+          sudo ./.github/setup-apt.sh
+          curl -fsL https://github.com/ccache/ccache/releases/download/v4.10.2/ccache-4.10.2-linux-x86_64.tar.xz | tar xJv --strip-components 1 -C /usr/bin ccache-4.10.2-linux-x86_64/ccache
+          ln -s $(command -v ccache) /usr/local/bin/gcc
+          ln -s $(command -v ccache) /usr/local/bin/g++
+          ln -s $(command -v ccache) /usr/local/bin/cc
+          ln -s $(command -v ccache) /usr/local/bin/c++
 
       - name: Build Toolchain
         run: |
