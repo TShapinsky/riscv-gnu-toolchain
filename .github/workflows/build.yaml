@@ -153,7 +153,6 @@ jobs:
           path: ${{ steps.toolchain.outputs.llvm }}.tar.gz
 
       - name: Cache Stats
-        if: ${{ always() }}
         run: |
           ccache --cleanup
           ccache -s -v
@@ -162,7 +161,6 @@ jobs:
 
       - name: Save Compile Cache
         uses: actions/upload-artifact@v4
-        if: ${{ always() }}
         with:
           name: ccache-${{ steps.toolchain.outputs.bits }}-${{matrix.mode}}-${{matrix.os}}
           path: ${{ env.CCACHE_DIR }}
