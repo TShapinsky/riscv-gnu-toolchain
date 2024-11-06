@@ -187,7 +187,7 @@ jobs:
           ccache --cleanup
           ccache -s -v
           ccache --evict-older-than $(($(date +%s) - ${{ steps.build-gcc.outputs.START_TIME }}))s
-          echo "hits=$(ccache -s -v | grep -Po \"Hits:.*?\(\K\d\d\" | head -1)" >> $GITHUB_OUTPUT
+          echo "hits=$(ccache -s -v | grep -Po 'Hits:.*?\(\K\d\d' | head -1)" >> $GITHUB_OUTPUT
 
       - name: Save Compile Cache
         uses: actions/upload-artifact@v4
