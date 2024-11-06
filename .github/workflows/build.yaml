@@ -202,8 +202,25 @@ jobs:
     runs-on: ubuntu-24.04
     needs: [build]
     steps:
+      - name: Download Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ccache-*
+          path: ${{ env.CCACHE_DIR }}
+          merge-multiple: true
+
+      - name: Check for Artifacts
+        id: check-artifacts
+        run: |
+          exists=false
+          if [ -d ${{ env.CCACHE_DIR }} ]; then
+            exists=true
+          fi
+          echo "exists=$exists" >> $GITHUB_OUTPUT
+      
       - name: Commit Compile Cache
         uses: actions/cache@v4
+        if: ${{ steps.check-artifacts.outputs.exists }}
         with:
           path: ${{ env.CCACHE_DIR }}
           key: ${{ env.compile-cache-key }}
@@ -211,14 +228,8 @@ jobs:
             ccache-${{ github.ref_name }}-
             ccache
 
-      - name: Download Artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: ccache-*
-          path: ${{ env.CCACHE_DIR }}
-          merge-multiple: true
-      
       - name: Cleanup Compile Cache
+        if: ${{ steps.check-artifacts.outputs.exists }}
         run: |
           curl -fsL https://github.com/ccache/ccache/releases/download/v4.10.2/ccache-4.10.2-linux-x86_64.tar.xz | sudo tar xJv --strip-components 1 -C /usr/bin ccache-4.10.2-linux-x86_64/ccache
           ccache -s -v
