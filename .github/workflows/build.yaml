@@ -7,115 +7,288 @@ on:
   pull_request:
     branches:
       - master
-
+env:
+  cache-path: |
+    .git/modules
+  CCACHE_DIR: ${{ github.workspace}}/ccache
+  CCACHE_NODIRECT: true # Only use hashes of code which has been through the preprocessor
+  CCACHE_NOHASHDIR: true # Don't include CWD in hash (allows caching to be shared between targets)
+  CCACHE_MAXSIZE: "3G" # Keep the compile cache less than 3Gib
+  CCACHE_BASEDIR: ${{ github.workspace }}
+  compile-cache-key: ccache-${{ github.ref_name }}-${{ github.sha }}
+  REGISTRY: "ghcr.io"
+  REGISTRY_BASE_URI: "ghcr.io/tshapinsky/riscv-gnu-toolchain"
 jobs:
+  container:
+    if: false
+    name: Construct Build Container
+    runs-on: ubuntu-24.04
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log into container registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    - name: Build and push
+      uses: docker/build-push-action@v6
+      with:
+        push: true
+        tags: ${{ env.REGISTRY_BASE_URI }}/build-image:latest
+
+  cache:
+    name: Update Submodule Cache
+    runs-on: ubuntu-24.04
+    outputs:
+      key: submodules-${{ steps.submodule-hash.outputs.HASH }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate Submodule Hash
+        id: submodule-hash
+        run: echo "HASH=$(git submodule | sha1sum | head -c 40)" >> $GITHUB_OUTPUT
+
+      - name: Check if Cache Exists for Exact Submodule Configuration
+        id: cache-check
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.cache-path }}
+          key: submodules-${{ steps.submodule-hash.outputs.HASH }}
+          lookup-only: true
+
+      - name: If Cache Misses, Update Cache
+        uses: actions/cache@v4
+        if: steps.cache-check.outputs.cache-hit != 'true'
+        with:
+          path: ${{ env.cache-path }}
+          key: submodules-${{ steps.submodule-hash.outputs.HASH }}
+          restore-keys: |
+            submodules-
+
+      - name: Clone Submodules
+        if: steps.cache-check.outputs.cache-hit != 'true'
+        run: |
+          git submodule update --init --progress uclibc-ng
+          git submodule update --init --progress --depth 1 --jobs $(nproc)
+    
   build:
+    name: Build Toolchain Variants
     runs-on: ${{ matrix.os }}
+    needs: [cache]
+    env:
+      cache-key: ${{ needs.cache.outputs.key }}
+      INSTALL_DIR: ${{ github.workspace }}/riscv
     strategy:
       matrix:
         os:     [ubuntu-22.04, ubuntu-24.04]
         mode:   [newlib, linux, musl, uclibc]
-        target: [rv32gc-ilp32d, rv64gc-lp64d]
-        compiler: [gcc, llvm]
-        exclude:
-          - mode: musl
-            compiler: llvm
-          - mode: uclibc
-            compiler: llvm
+        target: 
+        - arch: rv32gc
+          abi: ilp32d
+        - arch: rv64gc
+          abi: lp64d
     steps:
-      - name: Remove unneeded frameworks to recover disk space
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@v10
+        with:
+          root-reserve-mb: '10240'
+
+      - name: Generate Prebuilt Toolchain Name
+        id: toolchain
         run: |
-          echo "-- Before --"
-          df -h
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /usr/local/lib/android
-          echo "-- After --"
-          df -h
+          target=${{ matrix.target.arch }}
+          bits=${target:2:2}
+          case "${{ matrix.mode }}" in
+            "linux")
+              mode="glibc";;
+            "musl")
+              mode="musl";;
+            "uclibc")
+              mode="uclibc-ng";;
+            *)
+              mode="elf";;
+          esac
+          echo "bits=$bits" >> $GITHUB_OUTPUT
+          echo "mode=$mode" >> $GITHUB_OUTPUT
+          echo "gcc=risc$bits-$mode-${{ matrix.os }}-gcc-${{ github.job }}" >> $GITHUB_OUTPUT
+          echo "llvm=risc$bits-$mode-${{ matrix.os }}-llvm-${{ github.job }}" >> $GITHUB_OUTPUT
 
       - uses: actions/checkout@v4
 
-      - name: install dependencies
-        run: sudo ./.github/setup-apt.sh
-
-      - name: build toolchain
-        run: |
-          TARGET_TUPLE=($(echo ${{ matrix.target }} | tr "-" "\n"))
-          BUILD_TOOLCHAIN="./configure --prefix=/opt/riscv --with-arch=${TARGET_TUPLE[0]} --with-abi=${TARGET_TUPLE[1]}"
-          if [ "${{ matrix.compiler }}" == "llvm" ]; then # build toolchain with llvm
-            $BUILD_TOOLCHAIN --enable-llvm
-          else
-            $BUILD_TOOLCHAIN
-          fi
-          sudo make -j $(nproc) ${{ matrix.mode }}
-
-      - name: make report
-        if: |
-          matrix.os == 'ubuntu-24.04'
-          && (matrix.mode == 'linux' || matrix.mode == 'newlib')
-          && matrix.compiler == 'gcc'
-        run: |
-          sudo make report-${{ matrix.mode }} -j $(nproc)
-
-      - name: recover space
-        run: |
-          sudo du -hs / 2> /dev/null || true
-          sudo rm -rf binutils dejagnu gcc gdb glibc llvm musl newlib pk qemu spike uclibc-ng || true
-          sudo du -hs / 2> /dev/null || true
-
-      - name: tarball build
-        run: tar czvf riscv.tar.gz -C /opt/ riscv/
-
-      - name: generate prebuilt toolchain name
-        id:   toolchain-name-generator
-        run: |
-          if [[ "${{ matrix.target }}" == *"32"* ]]; then BITS=32; else BITS=64; fi
-          case "${{ matrix.mode }}" in
-            "linux")
-              MODE="glibc";;
-            "musl")
-              MODE="musl";;
-            "uclibc")
-              MODE="uclibc-ng";;
-            *)
-              MODE="elf";;
-          esac
-          echo "TOOLCHAIN_NAME=riscv$BITS-$MODE-${{ matrix.os }}-${{ matrix.compiler }}-nightly" >> $GITHUB_OUTPUT
-
-      - uses: actions/upload-artifact@v4
+      - name: Load Submodule Cache
+        uses: actions/cache/restore@v4
         with:
-          name: ${{ steps.toolchain-name-generator.outputs.TOOLCHAIN_NAME }}
-          path: riscv.tar.gz
+          path: ${{ env.cache-path }}
+          key: ${{ env.cache-key }}
+          
+      - name: Load Compile Cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ${{ env.compile-cache-key }}
+          restore-keys: |
+            ccache-${{ github.ref_name }}-
+            ccache
+        
+      - name: Install Dependencies
+        run: |
+          sudo ./.github/setup-apt.sh
+          curl -fsL https://github.com/ccache/ccache/releases/download/v4.10.2/ccache-4.10.2-linux-x86_64.tar.xz | sudo tar xJv --strip-components 1 -C /usr/bin ccache-4.10.2-linux-x86_64/ccache
+          ln -s $(command -v ccache) /usr/local/bin/gcc
+          ln -s $(command -v ccache) /usr/local/bin/g++
+          ln -s $(command -v ccache) /usr/local/bin/cc
+          ln -s $(command -v ccache) /usr/local/bin/c++
+
+        
+      - name: Build GCC Toolchain
+        id: build-gcc
+        run: |
+          ccache -z
+          START_TIME=$(date +%s)
+          ./configure --prefix=${{ env.INSTALL_DIR }} --with-arch=${{ matrix.target.arch }} --with-abi=${{ matrix.target.abi }}
+          make -j $(nproc) ${{ matrix.mode }}
+          echo "START_TIME=$START_TIME" >> $GITHUB_OUTPUT
+
+      - name: Tar GCC Toolchain
+        run: tar czvf ${{ steps.toolchain.outputs.gcc }}.tar.gz -C ${{ github.workspace }} riscv/
+
+      - name: Upload GCC Toolchain
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.toolchain.outputs.gcc }}
+          path: ${{ steps.toolchain.outputs.gcc }}.tar.gz
+
+      - name: Build LLVM Toolchain
+        if: ${{ matrix.mode == 'linux' || matrix.mode == 'newlib' }}
+        run: |
+          ./configure --prefix=${{ env.INSTALL_DIR }} --with-arch=${{ matrix.target.arch }} --with-abi=${{ matrix.target.abi }} --enable-llvm
+          make -j $(nproc) ${{ matrix.mode }}
+
+      - name: Tar LLVM Toolchain
+        if: ${{ matrix.mode == 'linux' || matrix.mode == 'newlib' }}
+        run: tar czvf ${{ steps.toolchain.outputs.llvm }}.tar.gz -C ${{ github.workspace }} riscv/
+  
+      - name: Upload LLVM Toolchain
+        uses: actions/upload-artifact@v4
+        if: ${{ matrix.mode == 'linux' || matrix.mode == 'newlib' }}
+        with:
+          name: ${{ steps.toolchain.outputs.llvm }}
+          path: ${{ steps.toolchain.outputs.llvm }}.tar.gz
+
+      - name: Cache Stats
+        id: cache-stats
+        run: |
+          ccache --cleanup
+          ccache -s -v
+          ccache --evict-older-than $(($(date +%s) - ${{ steps.build-gcc.outputs.START_TIME }}))s
+          echo "hits=$(ccache -s -v | grep -Po 'Hits:.*?\(\K\d\d' | head -1)" >> $GITHUB_OUTPUT
+
+      - name: Save Compile Cache
+        uses: actions/upload-artifact@v4
+        if: steps.cache-stats.outputs.hits < 95
+        with:
+          name: ccache-${{ steps.toolchain.outputs.bits }}-${{matrix.mode}}-${{matrix.os}}
+          path: ${{ env.CCACHE_DIR }}
+          include-hidden-files: true
+
+  compile-cache:
+    name: Post-Process Compile Cache Data
+    runs-on: ubuntu-24.04
+    needs: [build]
+    steps:
+      - name: Download Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ccache-*
+          path: ${{ env.CCACHE_DIR }}
+          merge-multiple: true
+
+      - name: Check for Artifacts
+        id: check-artifacts
+        run: |
+          if [ -d ${{ env.CCACHE_DIR }} ]; then
+            exists=true
+          fi
+          echo "exists=$exists" >> $GITHUB_OUTPUT
+      
+      - name: Commit Compile Cache
+        uses: actions/cache@v4
+        if: ${{ steps.check-artifacts.outputs.exists }}
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ${{ env.compile-cache-key }}
+          restore-keys: |
+            ccache-${{ github.ref_name }}-
+            ccache
+
+      - name: Cleanup Compile Cache
+        if: ${{ steps.check-artifacts.outputs.exists }}
+        run: |
+          curl -fsL https://github.com/ccache/ccache/releases/download/v4.10.2/ccache-4.10.2-linux-x86_64.tar.xz | sudo tar xJv --strip-components 1 -C /usr/bin ccache-4.10.2-linux-x86_64/ccache
+          ccache -s -v
+          ccache --cleanup
+          ccache -x
+          ccache -z
+
 
   test-sim:
+    name: Test Simulation
     runs-on: ${{ matrix.os }}
+    needs: [cache]
+    env:
+      cache-key: ${{ needs.cache.outputs.key }}
     strategy:
       matrix:
         os:     [ubuntu-24.04]
         mode:   [newlib]
-        target: [rv64gc-lp64d]
+        target:
+        - arch: rv64gc
+          abi: lp64d
         sim:    [spike]
     steps:
-      - name: Remove unneeded frameworks to recover disk space
-        run: |
-          echo "-- Before --"
-          df -h
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /usr/local/lib/android
-          echo "-- After --"
-          df -h
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@v10
+        with:
+          root-reserve-mb: '10240'
 
       - uses: actions/checkout@v4
 
-      - name: install dependencies
-        run: sudo ./.github/setup-apt.sh
+      - name: Restore Submodule Cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.cache-path }}
+          key: ${{ env.cache-key }}
 
-      - name: build toolchain
+      - name: Load Compile Cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ${{ env.compile-cache-key }}
+          restore-keys: |
+            ccache-${{ github.ref_name }}-
+            ccache
+  
+      - name: Install Dependencies
         run: |
-          TARGET_TUPLE=($(echo ${{ matrix.target }} | tr "-" "\n"))
-          ./configure --prefix=/opt/riscv --with-arch=${TARGET_TUPLE[0]} --with-abi=${TARGET_TUPLE[1]} --with-sim=${{ matrix.sim }}
+          sudo ./.github/setup-apt.sh
+          curl -fsL https://github.com/ccache/ccache/releases/download/v4.10.2/ccache-4.10.2-linux-x86_64.tar.xz | sudo tar xJv --strip-components 1 -C /usr/bin ccache-4.10.2-linux-x86_64/ccache
+          ln -s $(command -v ccache) /usr/local/bin/gcc
+          ln -s $(command -v ccache) /usr/local/bin/g++
+          ln -s $(command -v ccache) /usr/local/bin/cc
+          ln -s $(command -v ccache) /usr/local/bin/c++
+
+      - name: Build Toolchain
+        run: |
+          ./configure --prefix=/opt/riscv --with-arch=${{ matrix.target.arch}} --with-abi=${{ matrix.target.abi }} --with-sim=${{ matrix.sim }}
           make -j $(nproc) ${{ matrix.mode }}
 
-      - name: make report
+      - name: Generate Report
         run: make report-${{ matrix.mode }} -j $(nproc)
 
   build-multilib:
